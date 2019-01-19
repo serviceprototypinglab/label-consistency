@@ -95,21 +95,38 @@ def consistencycheck(contents):
 		faulty[contentname] = 0.0
 
 		c = yaml.load(contents[content])
-		if not "services" in c:
-			print("! no services found")
+
+		if "services" in c:
+			print("= type: docker-compose")
+			for service in c["services"]:
+				print("- service:", service)
+				numservices += 1
+				if not "labels" in c["services"][service]:
+					print("  ! no labels found")
+					faulty[contentname] = faulty.get(contentname, 0) + 1
+					continue
+				for labelpair in c["services"][service]["labels"]:
+					print("  - label:", labelpair)
+					label, value = labelpair.split("=")
+					alltags[label] = alltags.get(label, 0) + 1
+		elif "apiVersion" in c and "items" in c:
+			print("= type: kubernetes")
+			for service in c["items"]:
+				name = service["metadata"]["name"]
+				print("- service:", service["kind"], name)
+				numservices += 1
+				if not "labels" in service["metadata"]:
+					print("  ! no labels found")
+					faulty[contentname] = faulty.get(contentname, 0) + 1
+					continue
+				for label in service["metadata"]["labels"]:
+					value = service["metadata"]["labels"][label]
+					print("  - label:", label, "=", value)
+					alltags[label] = alltags.get(label, 0) + 1
+		else:
+			print("! no docker-compose or kubernetes service entries found")
 			faulty[contentname] = faulty.get(contentname, 0) + 1
 			continue
-		for service in c["services"]:
-			print("- service:", service)
-			numservices += 1
-			if not "labels" in c["services"][service]:
-				print("  ! no labels found")
-				faulty[contentname] = faulty.get(contentname, 0) + 1
-				continue
-			for labelpair in c["services"][service]["labels"]:
-				print("  - label:", labelpair)
-				label, value = labelpair.split("=")
-				alltags[label] = alltags.get(label, 0) + 1
 
 	return numservices, alltags, faulty
 
@@ -141,7 +158,7 @@ def sendmessage(host, label, series, message):
 			time.sleep(t)
 			t *= 2
 
-def labelchecker(autosearch, filebased, eventing):
+def labelchecker(autosearch, filebased, urlbased, eventing):
 	composefiles = []
 
 	d_start = time.time()
@@ -151,12 +168,15 @@ def labelchecker(autosearch, filebased, eventing):
 		f = open(filebased)
 		composefiles += [line.strip() for line in f.readlines()]
 
+	if urlbased:
+		composefiles += [urlbased]
+
 	if autosearch:
 		if not cachefiles:
 			org, basepath = autosearch.split("/")
-			composefiles = autosearch_github(org, basepath)
+			composefiles += autosearch_github(org, basepath)
 		else:
-			composefiles = cachefiles
+			composefiles += cachefiles
 
 	contents = loading(cachefiles, composefiles)
 	numservices, alltags, faulty = consistencycheck(contents)
@@ -182,15 +202,17 @@ def labelchecker(autosearch, filebased, eventing):
 		print("not sending message... {}".format(d))
 
 if len(sys.argv) == 1:
-	print("Syntax: {} [-a <org>/<basepath>] [-f <file>] [-e <kafka>/<space>/<series>]".format(sys.argv[0]), file=sys.stderr)
+	print("Syntax: {} [-a <org>/<basepath>] [-f <file>] [-u <url>] [-e <kafka>/<space>/<series>]".format(sys.argv[0]), file=sys.stderr)
 	print(" -a: autosearch; find appropriate compose files on GitHub")
 	print(" -f: filebased; load paths or URLs as lines from a text file")
+	print(" -u: urlbased; direct URL or path specification")
 	print(" -e: eventing; send results to Kafka endpoint with space and series selection")
 	print("Example: {} -a elastest/deploy -e kafka.cloudlab.zhaw.ch/user-1-docker_label_consistency/nightly".format(sys.argv[0]))
 	sys.exit(1)
 
 autosearch = None
 filebased = None
+urlbased = None
 eventing = None
 
 i = 1
@@ -199,6 +221,8 @@ while i < len(sys.argv):
 		autosearch = sys.argv[i + 1]
 	elif sys.argv[i] == "-f":
 		filebased = sys.argv[i + 1]
+	elif sys.argv[i] == "-u":
+		urlbased = sys.argv[i + 1]
 	elif sys.argv[i] == "-e":
 		eventing = sys.argv[i + 1]
 		if not "kafka" in dir():
@@ -206,4 +230,4 @@ while i < len(sys.argv):
 			eventing = None
 	i += 1
 
-labelchecker(autosearch, filebased, eventing)
+labelchecker(autosearch, filebased, urlbased, eventing)
