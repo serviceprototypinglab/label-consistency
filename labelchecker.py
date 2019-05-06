@@ -31,7 +31,7 @@ def autosearch_github(project, path):
 
 def normalise_githuburl(url):
 	m = re.match(r"^https://github.com/(.+)/blob/(.+)", url)
-	if len(m.groups()) == 2:
+	if m and len(m.groups()) == 2:
 		url = "https://raw.githubusercontent.com/{}/{}".format(m.groups()[0], m.groups()[1])
 	return url
 
